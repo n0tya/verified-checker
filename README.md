@@ -32,12 +32,11 @@ npx wrangler@4 secret put X_CLIENT_SECRET
 
 以前の方式で登録した `X_BEARER_TOKEN` は使っていません。消すときは `npx wrangler@4 secret delete X_BEARER_TOKEN` を実行します。
 
-### 管理ページ（admin.html）
+### 利用回数と管理ページ
 - 利用回数は D1 データベース `verified-checker-stats` の `daily` テーブルに、日付（日本時間）と種類ごとに数えています（`worker/schema.sql`）。
-- `admin.html` を開いて合言葉を入れると、日別の回数と X API の費用の概算が見られます。合言葉がないと中身は見られません（検索にも出ない設定）。
-- 合言葉の登録・変更は、長くて推測されにくい文字列を決めて次を実行します（チャットには貼らない）:
+- 公開サイトには管理ページを置いていません。数字は Cloudflare にログインしているパソコンから wrangler で読み出します（Worker には読み出し用の入口がありません）。例:
 ```bash
-npx wrangler@4 secret put ADMIN_TOKEN
+npx wrangler@4 d1 execute verified-checker-stats --remote --command "SELECT * FROM daily ORDER BY day DESC LIMIT 50"
 ```
 - テーブルを作り直すとき: `npx wrangler@4 d1 execute verified-checker-stats --remote --file schema.sql`
 

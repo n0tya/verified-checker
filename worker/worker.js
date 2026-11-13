@@ -15,8 +15,8 @@
 //   X_CLIENT_SECRET : 同じく Client Secret（Secret として登録。コードには書かない）
 //   ALLOWED_ORIGIN  : 戻り先として許すサイトのオリジン（カンマ区切り）
 //   LIMITER         : （任意）Rate Limiting バインディング。1つの IP からのログイン回数を制限する
-//   DB              : （任意）D1。日付と種類ごとの利用回数だけを数える（管理ページ admin.html 用）
-//   ADMIN_TOKEN     : 管理ページの合言葉（Secret として登録）。GET /admin/stats に Bearer で付ける
+//   DB              : （任意）D1。日付と種類ごとの利用回数だけを数える。
+//                     読むのはローカルの管理ページ（../verified-checker-admin、wrangler 経由）だけで、Worker からは読ませない
 //
 // 料金: ログイン1回につき User 読み取り1件（約 $0.01）。上限は X Developer Console の上限額で抑える。
 
@@ -39,7 +39,6 @@ export default {
     try {
       if (request.method === 'GET' && url.pathname === '/auth/login') return await login(request, env, ctx, url);
       if (request.method === 'GET' && url.pathname === '/auth/callback') return await callback(request, env, ctx, url);
-      if (url.pathname === '/admin/stats') return await adminStats(request, env, url);
     } catch (e) {
       count(env, ctx, 'error');
       return text('エラーが起きました。もう一度お試しください。', 500);
@@ -187,41 +186,6 @@ function count(env, ctx, event) {
       .run()
       .catch(() => {})
   );
-}
-
-async function adminStats(request, env, url) {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const cors = {
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization',
-    Vary: 'Origin',
-  };
-  if (allowed.includes(origin)) cors['Access-Control-Allow-Origin'] = origin;
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-  const json = (obj, status) =>
-    new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
-
-  if (!env.ADMIN_TOKEN) return json({ error: 'not_configured' }, 500);
-  const given = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!(await sameText(given, env.ADMIN_TOKEN))) return json({ error: 'unauthorized' }, 401);
-  if (!env.DB) return json({ error: 'no_db' }, 500);
-
-  const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get('days') || '30', 10) || 30));
-  const since = new Date(Date.now() + 9 * 3600 * 1000 - (days - 1) * 86400 * 1000).toISOString().slice(0, 10);
-  const daily = await env.DB.prepare('SELECT day, event, n FROM daily WHERE day >= ?1 ORDER BY day').bind(since).all();
-  const total = await env.DB.prepare('SELECT event, SUM(n) AS n FROM daily GROUP BY event').all();
-  return json({ since, days, daily: daily.results, total: total.results }, 200);
-}
-
-// 長さや内容で時間が変わらないように、ハッシュどうしを比べる
-async function sameText(a, b) {
-  const enc = new TextEncoder();
-  const [ha, hb] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))]);
-  const x = new Uint8Array(ha), y = new Uint8Array(hb);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
-  return diff === 0 && a.length > 0;
 }
 
 // 戻り先は ALLOWED_ORIGIN に入っているオリジンのページだけ
