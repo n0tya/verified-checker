@@ -1,0 +1,22 @@
+name = "verified-checker"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+# サイトのオリジン（パスは含めない）。ローカル確認用も入れておく
+ALLOWED_ORIGIN = "https://n0tya.github.io,http://localhost:8102"
+
+# 1つの IP からのログインは 60 秒に 10 回まで
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+# X_CLIENT_ID と X_CLIENT_SECRET はここに書かない。次のコマンドで Secret として登録する:
+#   npx wrangler secret put X_CLIENT_ID
+#   npx wrangler secret put X_CLIENT_SECRET

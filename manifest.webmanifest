@@ -1,0 +1,15 @@
+{
+  "name": "認証済みフォロワー チェッカー",
+  "short_name": "認証フォロワー",
+  "description": "X の @ID を入れると、認証済みフォロワーの人数と、収益化の条件まであと何人かが分かります。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1324",
+  "theme_color": "#0b1324",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
