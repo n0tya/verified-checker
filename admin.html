@@ -51,6 +51,7 @@
   .note { color: var(--muted); font-size: 12px; line-height: 1.8; margin-top: 10px; }
   .note a { color: var(--accent2); }
   .hidden { display: none !important; }
+  .show { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--muted); cursor: pointer; }
   @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
@@ -60,9 +61,10 @@
     <h1><img src="favicon.svg" alt="">管理ページ</h1>
     <p style="margin-top:12px">認証済みフォロワー チェッカーの利用回数を見るページです。合言葉（Cloudflare に登録した ADMIN_TOKEN）を入れてください。</p>
     <form id="loginForm">
-      <input id="token" type="password" autocomplete="current-password" placeholder="合言葉" aria-label="合言葉">
+      <input id="token" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="合言葉" aria-label="合言葉">
       <button class="btn" type="submit">ひらく</button>
     </form>
+    <label class="show"><input type="checkbox" id="showTok"> 入力した文字を表示する</label>
     <div class="err" id="loginErr"></div>
   </section>
 
@@ -195,11 +197,13 @@ function render(data) {
 
 $('loginForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const t = $('token').value.trim();
+  // 日本語入力の全角英数字を半角に直す（合言葉は半角で登録している前提）
+  const t = $('token').value.normalize('NFKC').trim();
   if (!t) return;
   setToken(t); $('token').value = '';
   load();
 });
+$('showTok').addEventListener('change', (e) => { $('token').type = e.target.checked ? 'text' : 'password'; });
 $('reload').addEventListener('click', load);
 $('days').addEventListener('change', load);
 $('logout').addEventListener('click', () => { setToken(''); showLogin(); });
