@@ -135,6 +135,7 @@ function showLogin(msg) {
 async function load() {
   const token = getToken();
   if (!token) return showLogin();
+  if (!/^[\x20-\x7e]+$/.test(token)) { setToken(''); return showLogin('合言葉に日本語や全角の文字が入っています。半角の英字・数字・記号だけの合言葉を登録して、それを入れてください。'); }
   const days = $('days').value;
   let res;
   try {
@@ -200,6 +201,8 @@ $('loginForm').addEventListener('submit', (e) => {
   // 日本語入力の全角英数字を半角に直す（合言葉は半角で登録している前提）
   const t = $('token').value.normalize('NFKC').trim();
   if (!t) return;
+  // ブラウザは日本語などを含む合言葉を送れない（送る前に止まる）ので、先に案内する
+  if (!/^[\x20-\x7e]+$/.test(t)) return showLogin('合言葉に日本語や全角の文字が入っています。半角の英字・数字・記号だけの合言葉を登録して、それを入れてください。');
   setToken(t); $('token').value = '';
   load();
 });
