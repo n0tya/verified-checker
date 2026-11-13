@@ -20,3 +20,9 @@ namespace_id = "1001"
 # X_CLIENT_ID と X_CLIENT_SECRET はここに書かない。次のコマンドで Secret として登録する:
 #   npx wrangler secret put X_CLIENT_ID
 #   npx wrangler secret put X_CLIENT_SECRET
+
+# 利用回数の集計（日付・種類ごとの回数だけ。アカウント名などは保存しない）
+[[d1_databases]]
+binding = "DB"
+database_name = "verified-checker-stats"
+database_id = "cef9732c-e020-4f62-a665-813640f8dee6"

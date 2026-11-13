@@ -15,6 +15,8 @@
 //   X_CLIENT_SECRET : 同じく Client Secret（Secret として登録。コードには書かない）
 //   ALLOWED_ORIGIN  : 戻り先として許すサイトのオリジン（カンマ区切り）
 //   LIMITER         : （任意）Rate Limiting バインディング。1つの IP からのログイン回数を制限する
+//   DB              : （任意）D1。日付と種類ごとの利用回数だけを数える（管理ページ admin.html 用）
+//   ADMIN_TOKEN     : 管理ページの合言葉（Secret として登録）。GET /admin/stats に Bearer で付ける
 //
 // 料金: ログイン1回につき User 読み取り1件（約 $0.01）。上限は X Developer Console の上限額で抑える。
 
@@ -35,16 +37,18 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/auth/login') return await login(request, env, url);
+      if (request.method === 'GET' && url.pathname === '/auth/login') return await login(request, env, ctx, url);
       if (request.method === 'GET' && url.pathname === '/auth/callback') return await callback(request, env, ctx, url);
+      if (url.pathname === '/admin/stats') return await adminStats(request, env, url);
     } catch (e) {
+      count(env, ctx, 'error');
       return text('エラーが起きました。もう一度お試しください。', 500);
     }
     return text('Not Found', 404);
   },
 };
 
-async function login(request, env, url) {
+async function login(request, env, ctx, url) {
   const site = allowedSite(url.searchParams.get('site'), env);
   if (!site) return text('このサイトからは利用できません。', 403);
   if (!env.X_CLIENT_ID || !env.X_CLIENT_SECRET) return backTo(site, { e: 'not_configured' });
@@ -53,8 +57,12 @@ async function login(request, env, url) {
   if (env.LIMITER) {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     const { success } = await env.LIMITER.limit({ key: ip });
-    if (!success) return backTo(site, { e: 'rate_limited' });
+    if (!success) {
+      count(env, ctx, 'rate_limited');
+      return backTo(site, { e: 'rate_limited' });
+    }
   }
+  count(env, ctx, 'login_start');
 
   const state = randomString(24);
   const verifier = randomString(48);
@@ -88,9 +96,15 @@ async function callback(request, env, ctx, url) {
   const site = saved && allowedSite(saved.site, env);
   if (!site) return text('ログインの有効期限が切れました。サイトからもう一度お試しください。', 400, { 'Set-Cookie': clear });
 
-  if (url.searchParams.get('error')) return backTo(site, { e: 'denied' }, clear);
+  if (url.searchParams.get('error')) {
+    count(env, ctx, 'denied');
+    return backTo(site, { e: 'denied' }, clear);
+  }
   const code = url.searchParams.get('code');
-  if (!code || url.searchParams.get('state') !== saved.state) return backTo(site, { e: 'state' }, clear);
+  if (!code || url.searchParams.get('state') !== saved.state) {
+    count(env, ctx, 'error');
+    return backTo(site, { e: 'state' }, clear);
+  }
 
   const basic = 'Basic ' + btoa(`${env.X_CLIENT_ID}:${env.X_CLIENT_SECRET}`);
   const tokenRes = await fetch('https://api.x.com/2/oauth2/token', {
@@ -104,13 +118,20 @@ async function callback(request, env, ctx, url) {
       client_id: env.X_CLIENT_ID,
     }),
   });
-  if (!tokenRes.ok) return backTo(site, { e: 'token' }, clear);
+  if (!tokenRes.ok) {
+    count(env, ctx, 'error');
+    return backTo(site, { e: 'token' }, clear);
+  }
   const { access_token: token } = await tokenRes.json();
-  if (!token) return backTo(site, { e: 'token' }, clear);
+  if (!token) {
+    count(env, ctx, 'error');
+    return backTo(site, { e: 'token' }, clear);
+  }
 
   const meRes = await fetch(`https://api.x.com/2/users/me?user.fields=${USER_FIELDS}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  count(env, ctx, 'api_call'); // X API の課金対象（約 $0.01）
 
   // トークンは保存せず、すぐに取り消す
   ctx.waitUntil(
@@ -121,11 +142,23 @@ async function callback(request, env, ctx, url) {
     }).catch(() => {})
   );
 
-  if (meRes.status === 429) return backTo(site, { e: 'rate_limited' }, clear);
-  if (meRes.status === 402) return backTo(site, { e: 'quota' }, clear);
-  if (!meRes.ok) return backTo(site, { e: 'upstream' }, clear);
+  if (meRes.status === 429) {
+    count(env, ctx, 'rate_limited');
+    return backTo(site, { e: 'rate_limited' }, clear);
+  }
+  if (meRes.status === 402) {
+    count(env, ctx, 'quota');
+    return backTo(site, { e: 'quota' }, clear);
+  }
+  if (!meRes.ok) {
+    count(env, ctx, 'error');
+    return backTo(site, { e: 'upstream' }, clear);
+  }
   const u = (await meRes.json()).data;
-  if (!u) return backTo(site, { e: 'upstream' }, clear);
+  if (!u) {
+    count(env, ctx, 'error');
+    return backTo(site, { e: 'upstream' }, clear);
+  }
 
   const result = {
     u: u.username,
@@ -138,7 +171,57 @@ async function callback(request, env, ctx, url) {
     vf: u.verified_followers_count == null ? null : Number(u.verified_followers_count),
     t: new Date().toISOString(),
   };
+  count(env, ctx, result.vf == null ? 'result_free' : 'result_premium');
   return backTo(site, { r: b64url(JSON.stringify(result)) }, clear);
+}
+
+// ===== 利用回数の集計（管理ページ用） =====
+// 日付（日本時間）と種類ごとの回数だけを数える。アカウント名・ID・IP などは保存しない。
+// 種類: login_start / api_call / result_premium / result_free / denied / error / rate_limited / quota
+function count(env, ctx, event) {
+  if (!env.DB) return;
+  const day = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  ctx.waitUntil(
+    env.DB.prepare('INSERT INTO daily (day, event, n) VALUES (?1, ?2, 1) ON CONFLICT(day, event) DO UPDATE SET n = n + 1')
+      .bind(day, event)
+      .run()
+      .catch(() => {})
+  );
+}
+
+async function adminStats(request, env, url) {
+  const origin = request.headers.get('Origin') || '';
+  const allowed = (env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const cors = {
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization',
+    Vary: 'Origin',
+  };
+  if (allowed.includes(origin)) cors['Access-Control-Allow-Origin'] = origin;
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  const json = (obj, status) =>
+    new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+
+  if (!env.ADMIN_TOKEN) return json({ error: 'not_configured' }, 500);
+  const given = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!(await sameText(given, env.ADMIN_TOKEN))) return json({ error: 'unauthorized' }, 401);
+  if (!env.DB) return json({ error: 'no_db' }, 500);
+
+  const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get('days') || '30', 10) || 30));
+  const since = new Date(Date.now() + 9 * 3600 * 1000 - (days - 1) * 86400 * 1000).toISOString().slice(0, 10);
+  const daily = await env.DB.prepare('SELECT day, event, n FROM daily WHERE day >= ?1 ORDER BY day').bind(since).all();
+  const total = await env.DB.prepare('SELECT event, SUM(n) AS n FROM daily GROUP BY event').all();
+  return json({ since, days, daily: daily.results, total: total.results }, 200);
+}
+
+// 長さや内容で時間が変わらないように、ハッシュどうしを比べる
+async function sameText(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0 && a.length > 0;
 }
 
 // 戻り先は ALLOWED_ORIGIN に入っているオリジンのページだけ

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>管理 - 認証済みフォロワー チェッカー</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b1324; --card: #131e36; --card2: #1a2747; --line: #263559;
+    --text: #e8eeff; --muted: #93a2c6; --accent: #3b9bff; --accent2: #7cc4ff;
+    --ok: #34d399; --warn: #fbbf24; --err: #f87171; --gray: #64748b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 32px; height: 32px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .top a { color: var(--accent2); font-size: 13px; }
+  button, input, select { font: inherit; }
+  .btn { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .login { max-width: 380px; margin: 60px auto; }
+  .login p { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 0 0 14px; }
+  .login input { width: 100%; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; color: var(--text); padding: 12px; margin-bottom: 10px; }
+  .login .btn { width: 100%; background: var(--accent); border: 0; color: #fff; padding: 12px; font-weight: 800; }
+  .err { color: var(--err); font-size: 13px; min-height: 1em; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .kpi .l { color: var(--muted); font-size: 12px; }
+  .kpi .v { font-size: 26px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi .s { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; padding-top: 8px; }
+  .chart .col { flex: 1; display: flex; flex-direction: column-reverse; min-width: 0; height: 100%; position: relative; }
+  .chart .seg { width: 100%; }
+  .chart .seg:last-child { border-radius: 3px 3px 0 0; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .note { color: var(--muted); font-size: 12px; line-height: 1.8; margin-top: 10px; }
+  .note a { color: var(--accent2); }
+  .hidden { display: none !important; }
+  @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <section id="loginView" class="card login hidden">
+    <h1><img src="favicon.svg" alt="">管理ページ</h1>
+    <p style="margin-top:12px">認証済みフォロワー チェッカーの利用回数を見るページです。合言葉（Cloudflare に登録した ADMIN_TOKEN）を入れてください。</p>
+    <form id="loginForm">
+      <input id="token" type="password" autocomplete="current-password" placeholder="合言葉" aria-label="合言葉">
+      <button class="btn" type="submit">ひらく</button>
+    </form>
+    <div class="err" id="loginErr"></div>
+  </section>
+
+  <section id="dash" class="hidden">
+    <div class="top">
+      <h1><img src="favicon.svg" alt="">認証済みフォロワー チェッカー 管理</h1>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="days" class="btn" aria-label="期間">
+          <option value="7">7日</option><option value="30" selected>30日</option><option value="90">90日</option>
+        </select>
+        <button class="btn" id="reload" type="button">更新</button>
+        <button class="btn" id="logout" type="button">閉じる</button>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="l">今日のログイン（X API）</div><div class="v" id="kToday">-</div><div class="s" id="kTodaySub"></div></div>
+      <div class="kpi"><div class="l">期間中のログイン</div><div class="v" id="kPeriod">-</div><div class="s" id="kPeriodSub"></div></div>
+      <div class="kpi"><div class="l">これまでの合計</div><div class="v" id="kAll">-</div><div class="s" id="kAllSub"></div></div>
+      <div class="kpi"><div class="l">X API の費用（概算）</div><div class="v" id="kCost">-</div><div class="s" id="kCostSub"></div></div>
+    </div>
+
+    <h2>日ごとの利用</h2>
+    <div class="card">
+      <div class="chart" id="chart"></div>
+      <div class="axis"><span id="axisFrom"></span><span id="axisTo"></span></div>
+      <div class="legend">
+        <span><i style="background:var(--accent2)"></i>人数が出た（Premium）</span>
+        <span><i style="background:var(--gray)"></i>人数なし（Premium 以外）</span>
+        <span><i style="background:var(--err)"></i>エラー</span>
+      </div>
+    </div>
+
+    <h2>内訳</h2>
+    <div class="card tablewrap">
+      <table>
+        <thead><tr><th>日付</th><th>ボタン</th><th>X API</th><th>Premium</th><th>Premium 以外</th><th>キャンセル</th><th>エラー</th><th>制限</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note">
+      ・数えているのは日付（日本時間）と種類ごとの回数だけです。アカウント名・ID・IP アドレスは保存していません。<br>
+      ・「ボタン」はログインボタンが押された回数、「X API」は X API を呼んだ回数（課金の対象。1回 約 $0.01）です。<br>
+      ・費用は回数からの概算です。実際の残高と請求は <a href="https://console.x.com" target="_blank" rel="noopener">X Developer Console</a> で確認してください。<br>
+      ・集計は 2026-11-13 の夜から始めたので、それより前の利用（動作確認2回）は入っていません。
+    </p>
+  </section>
+</main>
+
+<script>
+const API_BASE = 'https://verified-checker.n0tya.workers.dev';
+const COST_PER_CALL = 0.01;   // X API の User 読み取り1件（米ドル）
+const YEN_PER_DOLLAR = 155;    // 円の目安
+const KEY = 'vc_admin_token';
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n || 0).toLocaleString('ja-JP');
+
+function getToken() { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+function setToken(t) { try { t ? sessionStorage.setItem(KEY, t) : sessionStorage.removeItem(KEY); } catch (e) {} }
+
+function showLogin(msg) {
+  $('dash').classList.add('hidden');
+  $('loginView').classList.remove('hidden');
+  $('loginErr').textContent = msg || '';
+  $('token').focus();
+}
+
+async function load() {
+  const token = getToken();
+  if (!token) return showLogin();
+  const days = $('days').value;
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/admin/stats?days=${days}`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    return showLogin('サーバーにつながりませんでした。');
+  }
+  if (res.status === 401) { setToken(''); return showLogin('合言葉が違います。'); }
+  if (!res.ok) return showLogin('読み込めませんでした（' + res.status + '）。サーバーの設定を確認してください。');
+  render(await res.json());
+  $('loginView').classList.add('hidden');
+  $('dash').classList.remove('hidden');
+}
+
+function render(data) {
+  // 日付ごとにまとめる。データのない日も 0 で並べる
+  const byDay = {};
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const dates = [];
+  for (let i = data.days - 1; i >= 0; i--) {
+    const d = new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10);
+    dates.push(d); byDay[d] = {};
+  }
+  for (const r of data.daily) { if (byDay[r.day]) byDay[r.day][r.event] = r.n; }
+  const total = Object.fromEntries(data.total.map((r) => [r.event, r.n]));
+
+  const sum = (ev) => dates.reduce((a, d) => a + (byDay[d][ev] || 0), 0);
+  const t = byDay[today] || {};
+  const errOf = (o) => (o.error || 0) + (o.quota || 0);
+
+  $('kToday').textContent = fmt(t.api_call);
+  $('kTodaySub').textContent = `Premium ${fmt(t.result_premium)}・それ以外 ${fmt(t.result_free)}`;
+  $('kPeriod').textContent = fmt(sum('api_call'));
+  const p = sum('result_premium'), f = sum('result_free');
+  $('kPeriodSub').textContent = `Premium の割合 ${p + f ? Math.round((p / (p + f)) * 100) : 0}%（${data.days}日）`;
+  $('kAll').textContent = fmt(total.api_call);
+  $('kAllSub').textContent = `ボタン ${fmt(total.login_start)}回・キャンセル ${fmt(total.denied)}回`;
+  const usd = (total.api_call || 0) * COST_PER_CALL;
+  $('kCost').textContent = '$' + usd.toFixed(2);
+  $('kCostSub').textContent = `約 ${fmt(Math.round(usd * YEN_PER_DOLLAR))}円（これまでの合計）`;
+
+  // グラフ
+  const max = Math.max(1, ...dates.map((d) => (byDay[d].result_premium || 0) + (byDay[d].result_free || 0) + errOf(byDay[d])));
+  $('chart').innerHTML = dates.map((d) => {
+    const o = byDay[d];
+    const seg = (n, color) => n ? `<div class="seg" style="height:${(n / max) * 100}%;background:${color}"></div>` : '';
+    const tip = `${d}  Premium ${o.result_premium || 0} / それ以外 ${o.result_free || 0} / エラー ${errOf(o)}`;
+    return `<div class="col" title="${tip}">${seg(o.result_premium || 0, 'var(--accent2)')}${seg(o.result_free || 0, 'var(--gray)')}${seg(errOf(o), 'var(--err)')}</div>`;
+  }).join('');
+  $('axisFrom').textContent = dates[0].slice(5).replace('-', '/');
+  $('axisTo').textContent = '今日';
+
+  // 表（新しい日付から。全部 0 の日は省く）
+  const rows = dates.slice().reverse().filter((d) => Object.keys(byDay[d]).length).map((d) => {
+    const o = byDay[d];
+    return `<tr><td>${d}</td><td>${fmt(o.login_start)}</td><td>${fmt(o.api_call)}</td><td>${fmt(o.result_premium)}</td><td>${fmt(o.result_free)}</td><td>${fmt(o.denied)}</td><td>${fmt(errOf(o))}</td><td>${fmt(o.rate_limited)}</td></tr>`;
+  });
+  $('rows').innerHTML = rows.length ? rows.join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted)">この期間の利用はまだありません</td></tr>`;
+}
+
+$('loginForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const t = $('token').value.trim();
+  if (!t) return;
+  setToken(t); $('token').value = '';
+  load();
+});
+$('reload').addEventListener('click', load);
+$('days').addEventListener('change', load);
+$('logout').addEventListener('click', () => { setToken(''); showLogin(); });
+load();
+</script>
+</body>
+</html>
